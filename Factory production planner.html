@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Factory production planner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap">
+<style>
+:root{--bg:#f2f5f7;--panel:#fff;--ink:#12212b;--muted:#5b6b76;--line:#d9e1e6;--a:#0e7c86;--b:#d48a1c;--bad:#b3261e;--ok:#1b7a3d;--track:#e3eaee;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e171d;--panel:#16232b;--ink:#e8eff3;--muted:#93a4af;--line:#26363f;--a:#3cc0cb;--b:#f0b04a;--bad:#ff8a80;--ok:#6fd48f;--track:#27383f}}
+:root[data-theme="dark"]{--bg:#0e171d;--panel:#16232b;--ink:#e8eff3;--muted:#93a4af;--line:#26363f;--a:#3cc0cb;--b:#f0b04a;--bad:#ff8a80;--ok:#6fd48f;--track:#27383f}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+main{max-width:960px;margin:0 auto;padding:32px 20px 48px}
+h1{font-size:clamp(1.7rem,4vw,2.4rem);font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
+h2{font-size:1.1rem;margin:0 0 12px}
+.sub{color:var(--muted);margin:0 0 24px;max-width:62ch}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+@media (max-width:780px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 6px;text-align:center;font-size:.92rem}
+th{color:var(--muted);font-weight:600}
+td:first-child,th:first-child{text-align:left}
+input[type=number]{width:4.6rem;font:inherit;font-weight:600;text-align:center;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 4px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+button{font:inherit;font-weight:600;color:var(--ink);background:var(--track);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;margin-top:14px}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:.9rem;border:1px solid currentColor}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 14px;margin:12px 0;font-variant-numeric:tabular-nums}
+.kv span:nth-child(odd){color:var(--muted)}
+.kv span:nth-child(even){font-weight:600;text-align:right}
+.note{padding:12px 14px;border-radius:10px;background:var(--track);font-size:.93rem;margin-top:12px}
+.bars{display:grid;gap:10px}
+.bar{display:grid;grid-template-columns:5.5rem 1fr 5rem;gap:10px;align-items:center;font-size:.92rem}
+.track{height:16px;background:var(--track);border-radius:8px;overflow:hidden;position:relative}
+.fill{height:100%;border-radius:8px;transition:width .25s}
+.pair .track{height:10px;margin-bottom:3px}
+.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.eq{font-variant-numeric:tabular-nums;font-size:.95rem;margin:2px 0}
+.legend{display:flex;gap:16px;font-size:.88rem;color:var(--muted);margin-bottom:10px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+</style>
+</head>
+<body>
+<main>
+<h1>Factory production planner</h1>
+<p class="sub">Model machine hours as a linear system A·X = B. Edit the hours each product needs and each machine's capacity; the page checks consistency with matrix rank and finds the production quantities.</p>
+
+<div class="grid">
+  <section class="panel" aria-label="Inputs">
+    <h2>Machine hours per unit (A) and available hours (B)</h2>
+    <div class="scroll"><table id="inp"></table></div>
+    <button id="reset" type="button">Reset to example</button>
+    <div style="margin-top:16px"><h2>Equations</h2><div id="eqs"></div></div>
+  </section>
+
+  <section class="panel" aria-live="polite" aria-label="Rank analysis">
+    <h2>Rank and consistency</h2>
+    <div id="status"></div>
+    <div class="kv">
+      <span>Rank of A</span><span id="rA"></span>
+      <span>Rank of [A | B]</span><span id="rAB"></span>
+      <span>Unknowns</span><span>3</span>
+    </div>
+    <div class="note" id="explain"></div>
+    <div id="rref" class="scroll" style="margin-top:12px"></div>
+  </section>
+</div>
+
+<div class="grid" id="results">
+  <section class="panel">
+    <h2>Production plan</h2>
+    <div class="bars" id="plan"></div>
+    <div class="note" id="planNote" hidden></div>
+  </section>
+  <section class="panel">
+    <h2>Machine hours: available vs used</h2>
+    <div class="legend"><span><i class="dot" style="background:var(--b)"></i>Available</span><span><i class="dot" style="background:var(--a)"></i>Used</span></div>
+    <div class="bars" id="use"></div>
+    <div class="note" id="bott"></div>
+  </section>
+</div>
+</main>
+
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var EX={A:[[2,1,1],[1,2,1],[1,1,2]],B:[100,110,120]};
+var A=JSON.parse(JSON.stringify(EX.A)),B=EX.B.slice();
+var EPS=1e-9,N=3;
+function fmt(v){return (Math.round(v*100)/100).toLocaleString("en-US")}
+
+function rref(M){
+  var m=M.map(function(r){return r.slice()}),rows=m.length,cols=m[0].length,r=0,piv=[];
+  for(var c=0;c<cols&&r<rows;c++){
+    var p=r;
+    for(var i=r+1;i<rows;i++)if(Math.abs(m[i][c])>Math.abs(m[p][c]))p=i;
+    if(Math.abs(m[p][c])<EPS)continue;
+    var t=m[r];m[r]=m[p];m[p]=t;
+    var d=m[r][c];
+    m[r]=m[r].map(function(v){return v/d});
+    for(var k=0;k<rows;k++)if(k!==r){
+      var f=m[k][c];
+      if(f)m[k]=m[k].map(function(v,j){return v-f*m[r][j]});
+    }
+    piv.push(c);r++;
+  }
+  m=m.map(function(row){return row.map(function(v){return Math.abs(v)<EPS?0:v})});
+  return {m:m,piv:piv};
+}
+function rank(M){return rref(M).piv.length}
+
+function buildInputs(){
+  var h='<tr><th></th>';
+  for(var j=0;j<N;j++)h+='<th>Product '+(j+1)+'</th>';
+  h+='<th>Hours available</th></tr>';
+  for(var i=0;i<N;i++){
+    h+='<tr><td>Machine '+(i+1)+'</td>';
+    for(var j=0;j<N;j++)h+='<td><input type="number" min="0" step="any" data-r="'+i+'" data-c="'+j+'" value="'+A[i][j]+'" aria-label="Machine '+(i+1)+', product '+(j+1)+' hours per unit"></td>';
+    h+='<td><input type="number" min="0" step="any" data-r="'+i+'" data-c="b" value="'+B[i]+'" aria-label="Machine '+(i+1)+' available hours"></td></tr>';
+  }
+  $("inp").innerHTML=h;
+}
+function bar(label,val,max,color,valTxt){
+  var w=max>0?Math.max(0,Math.min(100,val/max*100)):0;
+  return '<div class="bar"><span>'+label+'</span><div class="track"><div class="fill" style="width:'+w+'%;background:'+color+'"></div></div><span class="num">'+valTxt+'</span></div>';
+}
+function render(){
+  // equations
+  $("eqs").innerHTML=A.map(function(row,i){
+    return '<div class="eq">'+row.map(function(v,j){return fmt(v)+'x<sub>'+(j+1)+'</sub>'}).join(' + ')+' = '+fmt(B[i])+'</div>';
+  }).join('');
+
+  var aug=A.map(function(r,i){return r.concat([B[i]])});
+  var rA=rank(A),rAB=rank(aug),cons=rA===rAB,uniq=cons&&rA===N;
+  $("rA").textContent=rA;$("rAB").textContent=rAB;
+  $("status").innerHTML=cons
+    ?'<span class="badge ok">Consistent</span> <span class="badge '+(uniq?'ok':'bad')+'" style="margin-left:6px">'+(uniq?'Unique solution':'Infinitely many solutions')+'</span>'
+    :'<span class="badge bad">Inconsistent</span>';
+  $("explain").textContent=!cons
+    ?'Rank of A is less than rank of [A | B], so no production plan can use every machine hour exactly. Try changing the available hours or the machine requirements.'
+    :uniq?'Both ranks equal the number of unknowns (3), so exactly one production plan uses all available hours.'
+    :'The ranks match but are below 3, so '+(N-rA)+' quantity(ies) can be chosen freely and the rest follow from them. There is no single plan.';
+
+  var R=rref(aug);
+  $("rref").innerHTML='<div class="label" style="color:var(--muted);font-size:.88rem;margin-bottom:4px">Reduced row echelon form of [A | B]</div><table>'+
+    R.m.map(function(r){return '<tr>'+r.map(function(v){return '<td>'+fmt(v)+'</td>'}).join('')+'</tr>'}).join('')+'</table>';
+
+  var plan=$("plan"),use=$("use"),pn=$("planNote"),bott=$("bott");
+  pn.hidden=true;
+  if(!uniq){
+    plan.innerHTML='<div style="color:var(--muted)">'+(cons?'No single plan to show. Make the machine requirements independent to get a unique one.':'No exact plan exists for these numbers.')+'</div>';
+    use.innerHTML='<div style="color:var(--muted)">Machine usage needs a unique production plan.</div>';
+    bott.textContent='Bottleneck analysis is available once the system has a unique solution.';
+    return;
+  }
+  var X=[0,1,2].map(function(i){return R.m[i][N]});
+  var maxX=Math.max.apply(null,X.map(Math.abs));
+  plan.innerHTML=X.map(function(v,i){
+    return bar('Product '+(i+1),Math.abs(v),maxX,v<-EPS?'var(--bad)':'var(--a)',fmt(v)+' units');
+  }).join('');
+  if(X.some(function(v){return v<-EPS})){
+    pn.hidden=false;
+    pn.textContent='A negative quantity is mathematically valid but cannot be produced. No real plan uses all hours exactly with these inputs.';
+  }
+  var used=A.map(function(r){return r.reduce(function(s,a,j){return s+a*X[j]},0)});
+  var maxH=Math.max.apply(null,B.concat(used));
+  use.innerHTML=used.map(function(u,i){
+    var pct=B[i]?u/B[i]*100:0;
+    return '<div class="pair"><div class="bar" style="grid-template-columns:5.5rem 1fr 5rem"><span>Machine '+(i+1)+'</span><div><div class="track"><div class="fill" style="width:'+(B[i]/maxH*100)+'%;background:var(--b)"></div></div><div class="track"><div class="fill" style="width:'+Math.max(0,u/maxH*100)+'%;background:var(--a)"></div></div></div><span class="num">'+fmt(pct)+'%</span></div></div>';
+  }).join('');
+  var util=used.map(function(u,i){return B[i]?u/B[i]*100:0});
+  var mx=Math.max.apply(null,util),ties=util.map(function(v,i){return Math.abs(v-mx)<1e-6?i+1:0}).filter(Boolean);
+  bott.textContent=ties.length===N
+    ?'Every machine is at '+fmt(mx)+'% utilization. Because the model uses all hours exactly, no single machine is the bottleneck.'
+    :'Bottleneck: Machine '+ties.join(', Machine ')+' at '+fmt(mx)+'% utilization.';
+}
+$("inp").addEventListener("input",function(e){
+  var t=e.target,v=parseFloat(t.value);
+  if(isNaN(v))return;
+  var r=+t.dataset.r;
+  if(t.dataset.c==="b")B[r]=v;else A[r][+t.dataset.c]=v;
+  render();
+});
+$("reset").addEventListener("click",function(){
+  A=JSON.parse(JSON.stringify(EX.A));B=EX.B.slice();buildInputs();render();
+});
+buildInputs();render();
+})();
+</script>
+</body>
+</html>
